@@ -17,11 +17,21 @@
 extern void wifi_init(const char* ssid, const char* pass);
 static struct mg_rpc* s_rpc_head = NULL;
 static const char* s_listen_on = "ws://0.0.0.0:8000";
-static const char* s_web_root = ".";
+static const char* s_web_root = "/web_root/";
 static const char* s_ca_path = "ca.pem";
 static const char* s_cert_path = "cert.pem";
 static const char* s_key_path = "key.pem";
 struct mg_str s_ca, s_cert, s_key;
+
+// Authenticated user.
+// A user can be authenticated by:
+//   - a name:pass pair, passed in a header Authorization: Basic .....
+//   - an access_token, passed in a header Cookie: access_token=....
+// When a user is shown a login screen, she enters a user:pass. If successful,
+// a server responds with a http-only access_token cookie set.
+struct user {
+  const char *name, *pass, *access_token;
+};
 
 static void rpc_call(struct mg_rpc_req* r, wrap_func func) {
   char buf[JSON_MAX_SIZE] = {};
@@ -118,6 +128,53 @@ void rest_system_handler(struct mg_connection* c, struct mg_http_message* hm,
   }
 }
 
+// Parse HTTP requests, return authenticated user or NULL
+static struct user *authenticate(struct mg_http_message *hm) {
+  // In production, make passwords strong and tokens randomly generated
+  // In this example, user list is kept in RAM. In production, it can
+  // be backed by file, database, or some other method.
+  static struct user users[] = {
+      {"admin", "admin", "admin_token"},
+      {"user1", "user1", "user1_token"},
+      {"user2", "user2", "user2_token"},
+      {NULL, NULL, NULL},
+  };
+  char user[64], pass[64];
+  struct user *u, *result = NULL;
+  mg_http_creds(hm, user, sizeof(user), pass, sizeof(pass));
+  MG_INFO(("user [%s] pass [%s]", user, pass));
+
+  if (user[0] != '\0' && pass[0] != '\0') {
+    // Both user and password is set, search by user/password
+    for (u = users; result == NULL && u->name != NULL; u++)
+      if (strcmp(user, u->name) == 0 && strcmp(pass, u->pass) == 0) result = u;
+  } else if (user[0] == '\0') {
+    // Only password is set, search by token
+    for (u = users; result == NULL && u->name != NULL; u++)
+      if (strcmp(pass, u->access_token) == 0) result = u;
+  }
+  return result;
+}
+
+static void handle_login(struct mg_connection *c, struct user *u) {
+  char cookie[256];
+  mg_snprintf(cookie, sizeof(cookie),
+              "Set-Cookie: access_token=%s; Path=/; "
+              "%sHttpOnly; SameSite=Lax; Max-Age=%d\r\n",
+              u->access_token, c->is_tls ? "Secure; " : "", 3600 * 24);
+  mg_http_reply(c, 200, cookie, "{%m:%m}", MG_ESC("user"), MG_ESC(u->name));
+}
+
+static void handle_logout(struct mg_connection *c) {
+  char cookie[256];
+  mg_snprintf(cookie, sizeof(cookie),
+              "Set-Cookie: access_token=; Path=/; "
+              "Expires=Thu, 01 Jan 1970 00:00:00 UTC; "
+              "%sHttpOnly; Max-Age=0; \r\n",
+              c->is_tls ? "Secure; " : "");
+  mg_http_reply(c, 200, cookie, "true\n");
+}
+
 static void rest_handler(struct mg_connection* c, struct mg_http_message* hm,
                          struct mg_str func) {
   printf("%s %.*s\n", __func__, func.len, func.buf);
@@ -147,9 +204,23 @@ static void fn(struct mg_connection* c, int ev, void* ev_data) {
       mg_ws_upgrade(c, hm, NULL);
     } else if (mg_match(hm->uri, mg_str("/rest/#"), caps)) {
       rest_handler(c, hm, caps[0]);
+    } else if (mg_match(hm->uri, mg_str("/api/login"), NULL)) {
+      MG_INFO(("REST API: /api/login"));
+      struct user *u = authenticate(hm);
+      if (u == NULL) {
+        mg_http_reply(c, 403, "", "Not Authorised\n");
+      } else {
+        handle_login(c, u);
+      }
+    } else if (mg_match(hm->uri, mg_str("/api/logout"), NULL)) {
+      MG_INFO(("REST API: /api/logout"));
+      handle_logout(c);
     } else {
       // Serve static files
-      struct mg_http_serve_opts opts = {.root_dir = s_web_root};
+      struct mg_http_serve_opts opts = {
+        .root_dir = s_web_root,
+        .fs = &mg_fs_packed,
+      };
       mg_http_serve_dir(c, ev_data, &opts);
     }
   } else if (ev == MG_EV_WS_MSG) {
