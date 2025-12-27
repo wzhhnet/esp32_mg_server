@@ -1,7 +1,7 @@
 #!/bin/sh
 
 GZ_FILES=""
-SRC_DIR="./web_root"
+SRC_DIR="web_root"
 
 if [ -z "$SRC_DIR" ]; then
   echo "Usage: $0 <source_dir>"

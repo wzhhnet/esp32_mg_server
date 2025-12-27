@@ -68,3 +68,28 @@ void wifi_init(const char *ssid, const char *pass) {
     MG_ERROR(("UNEXPECTED EVENT"));
   }
 }
+
+void wifi_scan(bool block) {
+  esp_wifi_scan_start(NULL, block);
+}
+
+void wifi_scan_result(struct mg_str *out) {
+  wifi_ap_record_t ap_info[10];
+  uint16_t ap_count = 10;
+  memset(ap_info, 0, sizeof(ap_info));
+  ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&ap_count, ap_info));
+  MG_INFO(("Total APs scanned = %d", ap_count));
+  size_t ofs = 0;
+  ofs += mg_snprintf(out->buf + ofs, out->len - ofs, "[");
+  for (uint16_t i = 0; i < ap_count; ++i) {
+    ofs += mg_snprintf(out->buf + ofs, out->len - ofs,
+                            "{\"ssid\":\"%s\", \"rssi\":%d, \"isopened\": %d}",
+                            ap_info[i].ssid, ap_info[i].rssi,
+                            (ap_info[i].authmode == WIFI_AUTH_OPEN) ? 1 : 0);
+    if (i < ap_count - 1) {
+      ofs += mg_snprintf(out->buf + ofs, out->len - ofs, ",");
+    }
+  }
+  ofs += mg_snprintf(out->buf + ofs, out->len - ofs, "]");
+  out->len = ofs;
+}

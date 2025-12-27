@@ -348,18 +348,30 @@ function WiFiConfig({}) {
   const [password, setPassword] = useState('');
   const [connecting, setConnecting] = useState(false);
 
-  useEffect(() => {
-    if (scanEnabled) {
-      fetch('api/wifi/scan')
-        .then(r => r.json())
-        .then(data => setSsids(data.ssids || []));
-    } else {
-      setSsids([]);
-      setSelectedSsid(null);
-    }
-  }, [scanEnabled]);
+  const LockIcon = props => html`<svg class=${props.class} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>`;
+
+  const getSignalIcon = (rssi) => {
+    if (rssi > -30) return 'text-green-600';
+    if (rssi > -60) return 'text-green-500';
+    if (rssi > -75) return 'text-yellow-500';
+    if (rssi > -90) return 'text-orange-500';
+    return 'text-red-500';
+  };
+
+  const fetchScan = () => {
+    return fetch('api/wifi/scan')
+      .then(r => {
+        console.log('Response object:', r);
+        return r.json();
+      })
+      .then(data => {
+        console.log('Parsed data:', data);
+        setSsids(data || []);
+      });
+  };
 
   const selectSsid = (ssid) => {
+    // console.log('Selected SSID:', ssid);
     setSelectedSsid(ssid);
     setPassword('');
   };
@@ -376,7 +388,24 @@ function WiFiConfig({}) {
         // maybe show success
       });
   };
-
+  useEffect(() => {
+    if (scanEnabled) {
+      const poll = () => {
+        fetchScan().then(() => {
+          if (scanEnabled) {
+            setTimeout(poll, 5000);
+          }
+        });
+      };
+      poll();
+    } else {
+      setSsids([]);
+      setSelectedSsid(null);
+    }
+    return () => {
+      // no-op cleanup for now
+    };
+  }, [scanEnabled]);
   return html`
 <div class="m-4 divide-y divide-gray-200 overflow-auto rounded bg-white">
   <div class="font-semibold flex items-center text-gray-600 px-3 justify-between">
@@ -388,9 +417,14 @@ function WiFiConfig({}) {
     <ul class="space-y-2">
       ${ssids.map(ssid => html`
         <li class="flex justify-between items-center p-2 border rounded">
-          <div>
-            <div class="font-medium">${ssid.ssid}</div>
-            <div class="text-sm text-gray-500">RSSI: ${ssid.rssi} dBm, ${ssid.encryption}</div>
+          <div class="flex items-center">
+            <div class="relative">
+              <${Icons.wifi} class="w-4 h-4 ${getSignalIcon(ssid.rssi)}" />
+              ${!ssid.isopened && html`<${LockIcon} class="absolute -top-1 -right-1 w-2 h-2 text-gray-600" />`}
+            </div>
+            <div class="ml-2">
+              <div class="font-medium">${ssid.ssid}</div>
+            </div>
           </div>
           <button onclick=${() => selectSsid(ssid)} class="px-4 py-2 bg-blue-500 text-white rounded">Select</button>
         </li>
@@ -401,7 +435,7 @@ function WiFiConfig({}) {
   ${selectedSsid && html`
   <div class="p-4">
     <div>Selected: ${selectedSsid.ssid}</div>
-    ${selectedSsid.encryption !== 'open' && html`
+    ${!selectedSsid.isopened && html`
       <input type="password" value=${password} oninput=${e => setPassword(e.target.value)} placeholder="Password" class="border p-2 w-full mt-2" />
     `}
     <button onclick=${connect} disabled=${connecting} class="mt-2 px-4 py-2 bg-green-500 text-white rounded w-full">${connecting ? 'Connecting...' : 'Connect'}</button>

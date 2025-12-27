@@ -6,7 +6,7 @@
 #define WIFI_SSID "XiaoSongHome"
 #define WIFI_PASS "happyflamingo657"
 #define JSON_HEADERS "Content-Type: application/json\r\n"
-#define JSON_MAX_SIZE 256
+#define JSON_MAX_SIZE 512
 #define SDK_VOID
 #ifndef RETURN_IF
 #define RETURN_IF(COND, RC, DO) \
@@ -15,6 +15,8 @@
   }
 #endif
 extern void wifi_init(const char* ssid, const char* pass);
+extern void wifi_scan(bool block);
+extern void wifi_scan_result(struct mg_str *out);
 static struct mg_rpc* s_rpc_head = NULL;
 static const char* s_listen_on = "ws://0.0.0.0:8000";
 static const char* s_web_root = "/web_root/";
@@ -215,6 +217,15 @@ static void fn(struct mg_connection* c, int ev, void* ev_data) {
     } else if (mg_match(hm->uri, mg_str("/api/logout"), NULL)) {
       MG_INFO(("REST API: /api/logout"));
       handle_logout(c);
+    } else if (mg_match(hm->uri, mg_str("/api/wifi/scan"), NULL)) {
+      MG_INFO(("REST API: /api/wifi/scan"));
+      wifi_scan(true);
+      MG_INFO(("Scan done"));
+      char buf[JSON_MAX_SIZE];
+      memset(buf, 0, sizeof(buf));
+      struct mg_str out = mg_str_n(buf, sizeof(buf));
+      wifi_scan_result(&out);
+      mg_http_reply(c, 200, JSON_HEADERS, "%.*s", out.len, out.buf);
     } else {
       // Serve static files
       struct mg_http_serve_opts opts = {
