@@ -337,3 +337,11 @@ const char* chip_info() {
   g_sysinfo[sizeof(g_sysinfo) - 1] = 0;
   return g_sysinfo;
 }
+
+bool wrap_wifi_scan(struct mg_str in, struct mg_str* out) {
+  if (!wifi_is_scanning()) {
+    wifi_scan_start();
+  }
+  wifi_scan_result(out);
+  return true;
+}

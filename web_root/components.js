@@ -114,7 +114,7 @@ export function Login({loginFn, logoIcon, title, tipText}) {
   const onsubmit = function(ev) {
     const authhdr = 'Basic ' + btoa(user + ':' + pass);
     const headers = {Authorization: authhdr};
-    return fetch('api/login', {headers}).then(loginFn).finally(r => setPass(''));
+    return fetch('rest/login', {headers}).then(loginFn).finally(r => setPass(''));
   };
   return html`
 <div class="h-full flex items-center justify-center bg-slate-200">

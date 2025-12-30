@@ -6,6 +6,7 @@
 #include "esp_chip_info.h"
 #include "esp_log.h"
 #include "mongoose.h"
+#include "wifi.h"
 
 #define JSON_SUCCESS "{\"cause\":\"success\"}"
 #define JSON_INVALID_PARAMS "{\"cause\":\"invalid parameters\"}"
@@ -22,5 +23,6 @@ bool wrap_pwm_config(struct mg_str in, struct mg_str* out);
 bool wrap_pwm_set_duty(struct mg_str in, struct mg_str* out);
 bool wrap_pwm_stop(struct mg_str in, struct mg_str* out);
 bool wrap_sys_info(struct mg_str in, struct mg_str* out);
+bool wrap_wifi_scan(struct mg_str in, struct mg_str* out);
 
 #endif

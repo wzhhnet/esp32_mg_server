@@ -347,6 +347,7 @@ function WiFiConfig({}) {
   const [selectedSsid, setSelectedSsid] = useState(null);
   const [password, setPassword] = useState('');
   const [connecting, setConnecting] = useState(false);
+  const timeoutRef = useRef(null);
 
   const LockIcon = props => html`<svg class=${props.class} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>`;
 
@@ -359,7 +360,7 @@ function WiFiConfig({}) {
   };
 
   const fetchScan = () => {
-    return fetch('api/wifi/scan')
+    return fetch('rest/wifi/scan')
       .then(r => {
         console.log('Response object:', r);
         return r.json();
@@ -393,7 +394,7 @@ function WiFiConfig({}) {
       const poll = () => {
         fetchScan().then(() => {
           if (scanEnabled) {
-            setTimeout(poll, 5000);
+            timeoutRef.current = setTimeout(poll, 5000);
           }
         });
       };
@@ -403,7 +404,10 @@ function WiFiConfig({}) {
       setSelectedSsid(null);
     }
     return () => {
-      // no-op cleanup for now
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
     };
   }, [scanEnabled]);
   return html`
@@ -451,12 +455,12 @@ const App = function({}) {
   const [user, setUser] = useState('');
   const [showSidebar, setShowSidebar] = useState(true);
 
-  const logout = () => fetch('api/logout').then(r => setUser(''));
+  const logout = () => fetch('rest/logout').then(r => setUser(''));
   const login = r => !r.ok ? setLoading(false) && setUser(null) : r.json()
       .then(r => setUser(r.user))
       .finally(r => setLoading(false));
 
-  useEffect(() => fetch('api/login').then(login), []);
+  useEffect(() => fetch('rest/login').then(login), []);
 
   if (loading) return '';  // Show blank page on initial load
   if (!user) return html`<${Login} loginFn=${login} logoIcon=${Logo}
