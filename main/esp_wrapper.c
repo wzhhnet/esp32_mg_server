@@ -339,9 +339,20 @@ const char* chip_info() {
 }
 
 bool wrap_wifi_scan(struct mg_str in, struct mg_str* out) {
-  if (!wifi_is_scanning()) {
-    wifi_scan_start();
-  }
+  wifi_scan_start();
   wifi_scan_result(out);
+  return true;
+}
+
+bool wrap_wifi_connect(struct mg_str in, struct mg_str* out) {
+  const char* ssid = mg_json_get_str(in, "$.ssid");
+  const char* password = mg_json_get_str(in, "$.password");
+  if (ssid == NULL || password == NULL) {
+    out->len = mg_snprintf(out->buf, out->len, JSON_INVALID_PARAMS);
+    return false;
+  }
+  MG_INFO(("%s connecting to SSID=%s PASS=%s", __func__, ssid, password));
+  wifi_connect(ssid, password);
+  out->len = mg_snprintf(out->buf, out->len, JSON_SUCCESS);
   return true;
 }

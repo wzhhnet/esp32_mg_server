@@ -12,95 +12,83 @@
 #define WIFI_FAIL_BIT BIT1
 #define WIFI_SCAN_DONE_BIT BIT2
 #define WIFI_SCAN_LIST_SIZE     10
+#define WIFI_MAX_RETRY       5
 
-static EventGroupHandle_t s_wifi_event_group;
 static struct wifi_context {
   SemaphoreHandle_t mutex;
   wifi_ap_record_t aps[WIFI_SCAN_LIST_SIZE];
   uint16_t ap_count;
-  bool scanning;
+  bool busy;
+  bool provisioned;
 } s_wifi_ctx = {
     .aps = {},
     .ap_count = 0,
-    .scanning = false
+    .busy = false,
+    .provisioned = false
 };
+
+static void wifi_set_busy(bool busy) {
+  xSemaphoreTake(s_wifi_ctx.mutex, portMAX_DELAY);
+  s_wifi_ctx.busy = busy;
+  xSemaphoreGive(s_wifi_ctx.mutex);
+}
+
+static bool wifi_get_busy() {
+  bool busy;
+  xSemaphoreTake(s_wifi_ctx.mutex, portMAX_DELAY);
+  busy = s_wifi_ctx.busy;
+  xSemaphoreGive(s_wifi_ctx.mutex);
+  return busy;
+}
 
 static void event_handler(void *arg, esp_event_base_t event_base,
                           int32_t event_id, void *event_data) {
   static int retry_count = 0;
   if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-    esp_wifi_connect();
+    if (s_wifi_ctx.provisioned) {
+      esp_wifi_connect();
+    }
   } else if (event_base == WIFI_EVENT &&
              event_id == WIFI_EVENT_STA_DISCONNECTED) {
-    esp_wifi_connect();
-    retry_count++;
+    if (retry_count < WIFI_MAX_RETRY) {
+      wifi_set_busy(true);
+      esp_wifi_connect();
+      retry_count++;
+    } else {
+      MG_INFO(("Failed to connect to SSID, transfer to NOT_PROVISIONED"));
+      wifi_set_busy(false);
+      s_wifi_ctx.provisioned = false;
+    }
     MG_INFO(("Connecting to the AP fail, attempt #%d", retry_count));
   } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
     ip_event_got_ip_t *event = (ip_event_got_ip_t *) event_data;
     MG_INFO(("Got IP ADDRESS: " IPSTR, IP2STR(&event->ip_info.ip)));
+    wifi_set_busy(false);
     retry_count = 0;
-    xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
   } else if (event_id == WIFI_EVENT_SCAN_DONE) {
     MG_INFO(("WiFi scan done"));
     xSemaphoreTake(s_wifi_ctx.mutex, portMAX_DELAY);
     s_wifi_ctx.ap_count = WIFI_SCAN_LIST_SIZE;
     memset(s_wifi_ctx.aps, 0, sizeof(s_wifi_ctx.aps));
     ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&s_wifi_ctx.ap_count, s_wifi_ctx.aps));
-    s_wifi_ctx.scanning = false;
+    s_wifi_ctx.busy = false;
     xSemaphoreGive(s_wifi_ctx.mutex);
-    xEventGroupSetBits(s_wifi_event_group, WIFI_SCAN_DONE_BIT);
   }
 }
 
-void wifi_init_sta(const char *ssid, const char *pass) {
+static void wifi_start_sta(wifi_config_t *cfg) {
 
-  s_wifi_event_group = xEventGroupCreate();
-  ESP_ERROR_CHECK(esp_netif_init());
-  ESP_ERROR_CHECK(esp_event_loop_create_default());
   esp_netif_create_default_wifi_sta();
-  wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-  ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-  esp_event_handler_instance_t instance_any_id;
-  esp_event_handler_instance_t instance_got_ip;
   ESP_ERROR_CHECK(esp_event_handler_instance_register(
-      WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler, NULL, &instance_any_id));
-  ESP_ERROR_CHECK(esp_event_handler_instance_register(
-      IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, NULL, &instance_got_ip));
-  wifi_config_t wc = {};
-  strncpy((char *) wc.sta.ssid, ssid, sizeof(wc.sta.ssid));
-  strncpy((char *) wc.sta.password, pass, sizeof(wc.sta.password));
+      IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, NULL, NULL));
   ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-  ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wc));
+  ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, cfg));
   ESP_ERROR_CHECK(esp_wifi_start());
-
-  MG_INFO(("Trying to connect to SSID:%s pass:%s", ssid, pass));
-  EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
-                                         WIFI_CONNECTED_BIT | WIFI_FAIL_BIT | WIFI_SCAN_DONE_BIT,
-                                         pdFALSE, pdFALSE, portMAX_DELAY);
-
-  if (bits & WIFI_CONNECTED_BIT) {
-    MG_INFO(("connected to ap SSID:%s pass:%s", ssid, pass));
-  } else if (bits & WIFI_FAIL_BIT) {
-    MG_ERROR(("Failed to connect to SSID:%s, pass:%s", ssid, pass));
-  } else {
-    MG_ERROR(("UNEXPECTED EVENT"));
-  }
 }
 
-void wifi_init_apsta(void* arg)
+static void wifi_start_provisioning()
 {
-    s_wifi_event_group = xEventGroupCreate();
     s_wifi_ctx.mutex = xSemaphoreCreateMutex();
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
-                                                        ESP_EVENT_ANY_ID,
-                                                        &event_handler,
-                                                        arg,
-                                                        NULL));
-    /*Initialize WiFi */
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     esp_netif_create_default_wifi_ap();
     wifi_config_t wifi_config = {
@@ -125,11 +113,33 @@ void wifi_init_apsta(void* arg)
              WIFI_SSID, WIFI_PASS, WIFI_CHANNEL));
 }
 
+void wifi_init() {
+  ESP_ERROR_CHECK(esp_netif_init());
+  ESP_ERROR_CHECK(esp_event_loop_create_default());
+  ESP_ERROR_CHECK(esp_event_handler_instance_register(
+      WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler, NULL, NULL));
+  /*Initialize WiFi */
+  wifi_init_config_t initcfg = WIFI_INIT_CONFIG_DEFAULT();
+  ESP_ERROR_CHECK(esp_wifi_init(&initcfg));
+  wifi_config_t cfg = {};
+  esp_wifi_get_config(WIFI_IF_STA, &cfg);
+  if (cfg.sta.ssid[0] != '\0') {
+    MG_INFO(("WiFi configured, connecting to SSID=%s", cfg.sta.ssid));
+    s_wifi_ctx.provisioned = true;
+    wifi_start_sta(&cfg);
+  } else {
+    MG_INFO(("WiFi not configured, starting AP+STA mode"));
+    wifi_start_provisioning();
+  }
+}
+
 void wifi_scan_start() {
-  xSemaphoreTake(s_wifi_ctx.mutex, portMAX_DELAY);
-  s_wifi_ctx.scanning = true;
-  xSemaphoreGive(s_wifi_ctx.mutex);
-  ESP_ERROR_CHECK(esp_wifi_scan_start(NULL, false));
+  if (!wifi_get_busy()) {
+    wifi_set_busy(true);
+    ESP_ERROR_CHECK(esp_wifi_scan_start(NULL, false));
+  } else {
+    MG_ERROR(("WiFi is busy, cannot start scan"));
+  }
 }
 
 void wifi_scan_result(struct mg_str *out) {
@@ -150,10 +160,12 @@ void wifi_scan_result(struct mg_str *out) {
   out->len = ofs;
 }
 
-bool wifi_is_scanning() {
-  bool scanning;
-  xSemaphoreTake(s_wifi_ctx.mutex, portMAX_DELAY);
-  scanning = s_wifi_ctx.scanning;
-  xSemaphoreGive(s_wifi_ctx.mutex);
-  return scanning;
+void wifi_connect(const char* ssid, const char* pass) {
+  wifi_config_t cfg = {};
+  strncpy((char*)cfg.sta.ssid, ssid, sizeof(cfg.sta.ssid) - 1);
+  strncpy((char*)cfg.sta.password, pass, sizeof(cfg.sta.password) - 1);
+  ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+  ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &cfg));
+  ESP_ERROR_CHECK(esp_wifi_connect());
+  wifi_set_busy(true);
 }

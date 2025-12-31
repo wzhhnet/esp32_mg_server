@@ -2,8 +2,6 @@
 #include "nvs_flash.h"
 #include "esp_wrapper.h"
 
-#define SSID_MAX_LEN 32
-#define PASS_MAX_LEN 64
 #define JSON_HEADERS "Content-Type: application/json\r\n"
 #define JSON_MAX_SIZE 512
 #define SDK_VOID
@@ -151,6 +149,8 @@ static void rest_wifi_handler(struct mg_connection* c,
                              struct mg_http_message* hm, struct mg_str func) {
   if (mg_match(func, mg_str("scan"), NULL)) {
     rest_call(c, hm, wrap_wifi_scan);
+  } else if (mg_match(func, mg_str("connect"), NULL)) {
+    rest_call(c, hm, wrap_wifi_connect);
   } else {
     mg_http_reply(c, 400, "", "{\"cause\": \"the rest api is not exist\"}\n");
   }
@@ -272,36 +272,10 @@ void app_main() {
     ret = nvs_flash_init();
   }
   ESP_ERROR_CHECK(ret);
-
-  nvs_handle_t nvs_handle;
-  ret = nvs_open("storage", NVS_READWRITE, &nvs_handle);
-  ESP_ERROR_CHECK(ret);
-  char ssid[SSID_MAX_LEN+1] = {};
-  char pass[PASS_MAX_LEN+1] = {};
-  size_t ssid_len = SSID_MAX_LEN;
-  size_t pass_len = PASS_MAX_LEN;
-  bool configured = false;
-  ret = nvs_get_str(nvs_handle, "ssid", ssid, &ssid_len);
-  if (ret == ESP_OK) {
-    ret = nvs_get_str(nvs_handle, "pass", pass, &pass_len);
-    if (ret == ESP_OK) {
-      MG_INFO(("Loaded WiFi credentials from NVS: SSID=%s PASS=%s", ssid, pass));
-      configured = true;
-    }
-  }
+  wifi_init();
 
   struct mg_mgr mgr;
   mg_mgr_init(&mgr);
-
-  if (configured) {
-    MG_INFO(("WiFi configured, connecting to SSID=%s", ssid));
-    wifi_init_sta(ssid, pass);  // This blocks until connected
-  } else {
-    nvs_flash_erase();
-    nvs_flash_init();
-    MG_INFO(("WiFi not configured, starting AP+STA mode"));
-    wifi_init_apsta(&mgr);
-  }
 
   //mg_timer_add(&mgr, 5000, MG_TIMER_REPEAT, timer_fn, &mgr);  // Init timer
   mg_rpc_add(&s_rpc_head, mg_str("gpio_config"), rpc_gpio_config, NULL);

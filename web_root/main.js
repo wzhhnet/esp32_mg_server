@@ -379,7 +379,7 @@ function WiFiConfig({}) {
 
   const connect = () => {
     setConnecting(true);
-    fetch('api/wifi/connect', {
+    fetch('rest/wifi/connect', {
       method: 'POST',
       body: JSON.stringify({ ssid: selectedSsid.ssid, password })
     })

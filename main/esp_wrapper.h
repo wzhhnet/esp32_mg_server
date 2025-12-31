@@ -24,5 +24,6 @@ bool wrap_pwm_set_duty(struct mg_str in, struct mg_str* out);
 bool wrap_pwm_stop(struct mg_str in, struct mg_str* out);
 bool wrap_sys_info(struct mg_str in, struct mg_str* out);
 bool wrap_wifi_scan(struct mg_str in, struct mg_str* out);
+bool wrap_wifi_connect(struct mg_str in, struct mg_str* out);
 
 #endif
