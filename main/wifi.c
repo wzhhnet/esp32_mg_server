@@ -45,6 +45,7 @@ static void event_handler(void *arg, esp_event_base_t event_base,
                           int32_t event_id, void *event_data) {
   static int retry_count = 0;
   if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+    MG_INFO(("WiFi started"));
     if (s_wifi_ctx.provisioned) {
       esp_wifi_connect();
     }
@@ -88,7 +89,6 @@ static void wifi_start_sta(wifi_config_t *cfg) {
 
 static void wifi_start_provisioning()
 {
-    s_wifi_ctx.mutex = xSemaphoreCreateMutex();
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     esp_netif_create_default_wifi_ap();
     wifi_config_t wifi_config = {
@@ -114,6 +114,7 @@ static void wifi_start_provisioning()
 }
 
 void wifi_init() {
+  s_wifi_ctx.mutex = xSemaphoreCreateMutex();
   ESP_ERROR_CHECK(esp_netif_init());
   ESP_ERROR_CHECK(esp_event_loop_create_default());
   ESP_ERROR_CHECK(esp_event_handler_instance_register(
