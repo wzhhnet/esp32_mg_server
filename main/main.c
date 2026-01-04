@@ -147,7 +147,9 @@ static void rest_logout_handler(struct mg_connection *c) {
 
 static void rest_wifi_handler(struct mg_connection* c,
                              struct mg_http_message* hm, struct mg_str func) {
-  if (mg_match(func, mg_str("scan"), NULL)) {
+  if (mg_match(func, mg_str("provisioned"), NULL)) {
+    rest_call(c, hm, wrap_wifi_provisioned);
+  } else if (mg_match(func, mg_str("scan"), NULL)) {
     rest_call(c, hm, wrap_wifi_scan);
   } else if (mg_match(func, mg_str("connect"), NULL)) {
     rest_call(c, hm, wrap_wifi_connect);

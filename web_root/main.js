@@ -342,6 +342,7 @@ function Settings({}) {
 };
 
 function WiFiConfig({}) {
+  const [provisioned, setProvisioned] = useState({state: false, ssid: ''});
   const [scanEnabled, setScanEnabled] = useState(false);
   const [ssids, setSsids] = useState([]);
   const [selectedSsid, setSelectedSsid] = useState(null);
@@ -358,6 +359,15 @@ function WiFiConfig({}) {
     if (rssi > -90) return 'text-orange-500';
     return 'text-red-500';
   };
+
+  const fetchProvisioned = () => {
+    return fetch('rest/wifi/provisioned')
+      .then(r => r.json())
+      .then(data => {
+        // console.log('Provisioned data:', data);
+        setProvisioned({state: data.provisioned, ssid: data.ssid});
+      });
+  }
 
   const fetchScan = () => {
     return fetch('rest/wifi/scan')
@@ -390,6 +400,9 @@ function WiFiConfig({}) {
       });
   };
   useEffect(() => {
+    fetchProvisioned();
+  }, []);
+  useEffect(() => {
     if (scanEnabled) {
       const poll = () => {
         fetchScan().then(() => {
@@ -410,8 +423,24 @@ function WiFiConfig({}) {
       }
     };
   }, [scanEnabled]);
+
+  const cancel = () => {
+    setConnecting(false);
+    setSelectedSsid(null);
+    setPassword('');
+  }
   return html`
 <div class="m-4 divide-y divide-gray-200 overflow-auto rounded bg-white">
+  ${provisioned.state && html`
+    <div class="font-semibold flex items-center text-green-600 px-3 justify-between">
+      <div>WiFi is connected to ${provisioned.ssid}</div>
+    </div>
+  `}
+  ${!provisioned.state && html`
+    <div class="font-semibold flex items-center text-red-600 px-3 justify-between">
+      <div>WiFi is not provisioned</div>
+    </div>
+  `}
   <div class="font-semibold flex items-center text-gray-600 px-3 justify-between">
     <div>WiFi Configuration</div>
     <${Setting} title="Scan" value=${scanEnabled} setfn=${setScanEnabled} type="switch" />
@@ -443,6 +472,7 @@ function WiFiConfig({}) {
       <input type="password" value=${password} oninput=${e => setPassword(e.target.value)} placeholder="Password" class="border p-2 w-full mt-2" />
     `}
     <button onclick=${connect} disabled=${connecting} class="mt-2 px-4 py-2 bg-green-500 text-white rounded w-full">${connecting ? 'Connecting...' : 'Connect'}</button>
+    <button onclick=${cancel} class="mt-2 px-4 py-2 bg-green-500 text-white rounded w-full">cancel</button>
   </div>
   `}
 </div>

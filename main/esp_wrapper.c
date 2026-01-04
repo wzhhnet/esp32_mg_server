@@ -338,6 +338,15 @@ const char* chip_info() {
   return g_sysinfo;
 }
 
+bool wrap_wifi_provisioned(struct mg_str in, struct mg_str* out) {
+  char ssid[MAX_SSID_LEN+1] = {};
+  bool provisioned = wifi_is_provisioned(ssid);
+  out->len = mg_snprintf(out->buf, out->len,
+                         "{\"cause\":\"success\", \"provisioned\": %s, \"ssid\": \"%s\"}",
+                         provisioned ? "true" : "false", provisioned ? ssid : "");
+  return true;
+}
+
 bool wrap_wifi_scan(struct mg_str in, struct mg_str* out) {
   wifi_scan_start();
   wifi_scan_result(out);
