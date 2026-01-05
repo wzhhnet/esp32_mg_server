@@ -202,7 +202,7 @@ static void ip_event_handler(void *arg, int32_t event_id, void *event_data)
     MG_INFO(("Got IP ADDRESS: " IPSTR, IP2STR(&event->ip_info.ip)));
     if (!wifi_get_provisioned()) {
       wifi_set_provisioned(true);
-      MG_INFO(("wifi provisioned successfully!!! need rebooting..."));
+      MG_INFO(("wifi provisioned successfully!!!"));
       //esp_restart();
     }
   }

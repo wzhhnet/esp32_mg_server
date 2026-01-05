@@ -365,3 +365,4 @@ bool wrap_wifi_connect(struct mg_str in, struct mg_str* out) {
   out->len = mg_snprintf(out->buf, out->len, JSON_SUCCESS);
   return true;
 }
+
