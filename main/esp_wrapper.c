@@ -339,11 +339,11 @@ const char* chip_info() {
 }
 
 bool wrap_wifi_provisioned(struct mg_str in, struct mg_str* out) {
-  char ssid[MAX_SSID_LEN+1] = {};
-  bool provisioned = wifi_is_provisioned(ssid);
+  struct wifi_prov_info info = {};
+  bool provisioned = wifi_provisioned(&info);
   out->len = mg_snprintf(out->buf, out->len,
                          "{\"cause\":\"success\", \"provisioned\": %s, \"ssid\": \"%s\"}",
-                         provisioned ? "true" : "false", provisioned ? ssid : "");
+                         provisioned ? "true" : "false", provisioned ? info.ssid : "");
   return true;
 }
 
@@ -361,7 +361,10 @@ bool wrap_wifi_connect(struct mg_str in, struct mg_str* out) {
     return false;
   }
   MG_INFO(("%s connecting to SSID=%s PASS=%s", __func__, ssid, password));
-  wifi_connect(ssid, password);
+  struct wifi_prov_cfg cfg = {};
+  strncpy(cfg.ssid, ssid, sizeof(cfg.ssid) - 1);
+  strncpy(cfg.pass, password, sizeof(cfg.pass) - 1);
+  wifi_provision(&cfg);
   out->len = mg_snprintf(out->buf, out->len, JSON_SUCCESS);
   return true;
 }

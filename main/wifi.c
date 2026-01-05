@@ -20,7 +20,6 @@ ESP_EVENT_DEFINE_BASE(WIFI_USER_EVENT);
 enum {
     WIFI_USER_EVENT_SCAN,
     WIFI_USER_EVENT_PROVISION,
-
 };
 enum wifi_state {
   WIFI_STATE_IDLE,
@@ -35,16 +34,14 @@ static esp_netif_t *s_sta_netif = NULL;
 static struct wifi_context {
   SemaphoreHandle_t mutex;
   uint8_t state;
-  wifi_config_t cfg;
+  struct wifi_prov_cfg cfg; // cache of wifi config
   wifi_ap_record_t aps[WIFI_SCAN_LIST_SIZE];
-  char ssid[MAX_SSID_LEN+1];
   uint16_t ap_count;
   uint16_t retry_count;
 } s_wifi_ctx = {
     .state = WIFI_STATE_IDLE,
     .cfg = {},
     .aps = {},
-    .ssid = {},
     .ap_count = 0,
     .retry_count = 0,
 };
@@ -91,14 +88,24 @@ static void wifi_start_provisioning()
            WIFI_SSID, WIFI_PASS, WIFI_CHANNEL));
 }
 
-static bool wifi_get_provisioned() {
-  uint8_t provisioned = 0;
-  esp_err_t err = nvs_get_u8(s_nvs_wifi_handle, NVS_WIFI_PROVISIONED, &provisioned);
-  return (err == ESP_OK && provisioned);
+static void wifi_get_provisioned(struct wifi_prov_info *prov) {
+  size_t size = sizeof(struct wifi_prov_info);
+  nvs_get_blob(s_nvs_wifi_handle, NVS_WIFI_PROVISIONED, prov, &size);
 }
 
-static void wifi_set_provisioned(bool provisioned) {
-  nvs_set_u8(s_nvs_wifi_handle, NVS_WIFI_PROVISIONED, provisioned ? 1 : 0);
+static void wifi_set_provisioned(struct wifi_prov_info *prov) {
+  nvs_set_blob(s_nvs_wifi_handle, NVS_WIFI_PROVISIONED, prov, sizeof(struct wifi_prov_info));
+  nvs_commit(s_nvs_wifi_handle);
+}
+
+static bool wifi_is_provisioned() {
+  struct wifi_prov_info prov = {};
+  wifi_get_provisioned(&prov);
+  return strlen(prov.ssid) > 0;
+}
+
+static void wifi_clear_provisioned() {
+  nvs_erase_key(s_nvs_wifi_handle, NVS_WIFI_PROVISIONED);
   nvs_commit(s_nvs_wifi_handle);
 }
 
@@ -111,18 +118,16 @@ static void wifi_save_scan_results() {
   xSemaphoreGive(s_wifi_ctx.mutex);
 }
 
-static void wifi_save_config(wifi_config_t *cfg) {
-  xSemaphoreTake(s_wifi_ctx.mutex, portMAX_DELAY);
-  memcpy(&s_wifi_ctx.cfg, cfg, sizeof(wifi_config_t));
-  xSemaphoreGive(s_wifi_ctx.mutex);
+static void wifi_cache_config(struct wifi_prov_cfg *cfg) {
+  memcpy(&s_wifi_ctx.cfg, cfg, sizeof(struct wifi_prov_cfg));
 }
 
 static void wifi_commit_config() {
-  wifi_config_t *cfg = &s_wifi_ctx.cfg;
-  MG_INFO(("Committing WiFi config SSID=%s PASS=%s", cfg->sta.ssid, cfg->sta.password));
-  xSemaphoreTake(s_wifi_ctx.mutex, portMAX_DELAY);
-  ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, cfg));
-  xSemaphoreGive(s_wifi_ctx.mutex);
+  wifi_config_t cfg = {};
+  strncpy((char*)cfg.sta.ssid, s_wifi_ctx.cfg.ssid, sizeof(cfg.sta.ssid) - 1);
+  strncpy((char*)cfg.sta.password, s_wifi_ctx.cfg.pass, sizeof(cfg.sta.password) - 1);
+  MG_INFO(("Committing WiFi config SSID=%s PASS=%s", cfg.sta.ssid, cfg.sta.password));
+  ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &cfg));
 }
 
 static bool wifi_is_busy() {
@@ -144,13 +149,14 @@ static void event_user_handler(void *arg, int32_t event_id, void *event_data)
   } else if (event_id == WIFI_USER_EVENT_PROVISION) {
     MG_INFO(("User event: provisioning"));
     s_wifi_ctx.retry_count = 0;
+    wifi_cache_config((struct wifi_prov_cfg *)event_data);
     if (s_wifi_ctx.state == WIFI_STATE_SCANNING) {
       MG_INFO(("Stopping ongoing scan before provisioning"));
       esp_wifi_scan_stop();
     }
-    if (wifi_get_provisioned()) {
+    if (wifi_is_provisioned()) {
       MG_INFO(("WiFi is already provisioned, disconnecting first"));
-      wifi_set_provisioned(false);
+      wifi_clear_provisioned();
       s_wifi_ctx.state = WIFI_STATE_REPROVISIONING;
       ESP_ERROR_CHECK(esp_wifi_disconnect());
     } else {
@@ -158,14 +164,13 @@ static void event_user_handler(void *arg, int32_t event_id, void *event_data)
       s_wifi_ctx.state = WIFI_STATE_CONNECTING;
       ESP_ERROR_CHECK(esp_wifi_connect());
     }
-    free(event_data);
   }
 }
 
 static void event_wifi_handler(void *arg, int32_t event_id, void *event_data)
 {
   if (event_id == WIFI_EVENT_STA_START) {
-    if (wifi_get_provisioned()) {
+    if (wifi_is_provisioned()) {
       s_wifi_ctx.state = WIFI_STATE_CONNECTING;
       ESP_ERROR_CHECK(esp_wifi_connect());
     }
@@ -200,8 +205,11 @@ static void ip_event_handler(void *arg, int32_t event_id, void *event_data)
   if (event_id == IP_EVENT_STA_GOT_IP) {
     ip_event_got_ip_t *event = (ip_event_got_ip_t *) event_data;
     MG_INFO(("Got IP ADDRESS: " IPSTR, IP2STR(&event->ip_info.ip)));
-    if (!wifi_get_provisioned()) {
-      wifi_set_provisioned(true);
+    if (!wifi_is_provisioned()) {
+      struct wifi_prov_info prov = {};
+      strncpy(prov.ssid, (char*)s_wifi_ctx.cfg.ssid, sizeof(prov.ssid) - 1);
+      esp_ip4addr_ntoa(&event->ip_info.ip, prov.ipv4, sizeof(prov.ipv4));
+      wifi_set_provisioned(&prov);
       MG_INFO(("wifi provisioned successfully!!!"));
       //esp_restart();
     }
@@ -240,7 +248,7 @@ void wifi_init() {
   wifi_init_config_t initcfg = WIFI_INIT_CONFIG_DEFAULT();
   ESP_ERROR_CHECK(esp_wifi_init(&initcfg));
   s_wifi_ctx.state = WIFI_STATE_IDLE;
-  if (wifi_get_provisioned()) {
+  if (wifi_is_provisioned()) {
     MG_INFO(("WiFi is provisioned, starting STA mode"));
     wifi_config_t cfg = {};
     esp_wifi_get_config(WIFI_IF_STA, &cfg);
@@ -294,22 +302,13 @@ void wifi_scan_result(struct mg_str *out) {
   out->len = ofs;
 }
 
-void wifi_connect(const char* ssid, const char* pass) {
-  wifi_config_t cfg = {};
-  strncpy((char*)cfg.sta.ssid, ssid, sizeof(cfg.sta.ssid) - 1);
-  strncpy((char*)cfg.sta.password, pass, sizeof(cfg.sta.password) - 1);
-  wifi_save_config(&cfg);
-  esp_event_post(WIFI_USER_EVENT, WIFI_USER_EVENT_PROVISION, NULL, 0, portMAX_DELAY);
+void wifi_provision(struct wifi_prov_cfg *cfg) {
+  esp_event_post(WIFI_USER_EVENT, WIFI_USER_EVENT_PROVISION,
+    cfg, sizeof(struct wifi_prov_cfg), portMAX_DELAY);
 }
 
-bool wifi_is_provisioned(char* ssid)
+bool wifi_provisioned(struct wifi_prov_info *info)
 {
-  bool provisioned = wifi_get_provisioned();
-  if (provisioned) {
-    wifi_config_t cfg = {};
-    ESP_ERROR_CHECK(esp_wifi_get_config(WIFI_IF_STA, &cfg));
-    strncpy(ssid, (char*)cfg.sta.ssid, MAX_SSID_LEN);
-    return true;
-  }
-  return false;
+  wifi_get_provisioned(info);
+  return strlen(info->ssid) > 0;
 }
