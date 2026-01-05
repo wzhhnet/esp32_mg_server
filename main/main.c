@@ -83,8 +83,10 @@ static void rest_call(struct mg_connection* c, struct mg_http_message* hm,
   char buf[JSON_MAX_SIZE] = {};
   struct mg_str out = {.buf = buf, .len = sizeof(buf)};
   if (func(hm->body, &out)) {
+    MG_INFO(("%s http reply success", __func__));
     mg_http_reply(c, 200, "", "%.*s", out.len, out.buf);
   } else {
+    MG_ERROR(("%s http reply error", __func__));
     mg_http_reply(c, 400, "", "%.*s", out.len, out.buf);
   }
 }

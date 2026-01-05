@@ -16,22 +16,37 @@
 #define WIFI_SCAN_LIST_SIZE     10
 #define WIFI_MAX_RETRY       5
 
+ESP_EVENT_DEFINE_BASE(WIFI_USER_EVENT);
+enum {
+    WIFI_USER_EVENT_SCAN,
+    WIFI_USER_EVENT_PROVISION,
+
+};
+enum wifi_state {
+  WIFI_STATE_IDLE,
+  WIFI_STATE_SCANNING,
+  WIFI_STATE_CONNECTING,
+  WIFI_STATE_REPROVISIONING,
+};
+
 static nvs_handle_t s_nvs_wifi_handle = 0;
 static esp_netif_t *s_ap_netif = NULL;
 static esp_netif_t *s_sta_netif = NULL;
 static struct wifi_context {
   SemaphoreHandle_t mutex;
+  uint8_t state;
+  wifi_config_t cfg;
   wifi_ap_record_t aps[WIFI_SCAN_LIST_SIZE];
   char ssid[MAX_SSID_LEN+1];
   uint16_t ap_count;
-  bool busy;
-  bool provisioned;
+  uint16_t retry_count;
 } s_wifi_ctx = {
+    .state = WIFI_STATE_IDLE,
+    .cfg = {},
     .aps = {},
     .ssid = {},
     .ap_count = 0,
-    .busy = false,
-    .provisioned = false
+    .retry_count = 0,
 };
 
 static void wifi_start_sta(wifi_config_t *cfg) {
@@ -87,60 +102,120 @@ static void wifi_set_provisioned(bool provisioned) {
   nvs_commit(s_nvs_wifi_handle);
 }
 
-static void wifi_set_busy(bool busy) {
+static void wifi_save_scan_results() {
   xSemaphoreTake(s_wifi_ctx.mutex, portMAX_DELAY);
-  s_wifi_ctx.busy = busy;
+  s_wifi_ctx.ap_count = WIFI_SCAN_LIST_SIZE;
+  memset(s_wifi_ctx.aps, 0, sizeof(s_wifi_ctx.aps));
+  ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&s_wifi_ctx.ap_count, s_wifi_ctx.aps));
+  MG_INFO(("Total APs scanned = %d", s_wifi_ctx.ap_count));
   xSemaphoreGive(s_wifi_ctx.mutex);
 }
 
-static bool wifi_get_busy() {
-  bool busy;
+static void wifi_save_config(wifi_config_t *cfg) {
   xSemaphoreTake(s_wifi_ctx.mutex, portMAX_DELAY);
-  busy = s_wifi_ctx.busy;
+  memcpy(&s_wifi_ctx.cfg, cfg, sizeof(wifi_config_t));
   xSemaphoreGive(s_wifi_ctx.mutex);
-  return busy;
+}
+
+static void wifi_commit_config() {
+  wifi_config_t *cfg = &s_wifi_ctx.cfg;
+  MG_INFO(("Committing WiFi config SSID=%s PASS=%s", cfg->sta.ssid, cfg->sta.password));
+  xSemaphoreTake(s_wifi_ctx.mutex, portMAX_DELAY);
+  ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, cfg));
+  xSemaphoreGive(s_wifi_ctx.mutex);
+}
+
+static bool wifi_is_busy() {
+  return s_wifi_ctx.state == WIFI_STATE_CONNECTING ||
+         s_wifi_ctx.state == WIFI_STATE_SCANNING ||
+         s_wifi_ctx.state == WIFI_STATE_REPROVISIONING;
+}
+
+static void event_user_handler(void *arg, int32_t event_id, void *event_data)
+{
+  if (event_id == WIFI_USER_EVENT_SCAN) {
+    if (!wifi_is_busy()) {
+      s_wifi_ctx.state = WIFI_STATE_SCANNING;
+      MG_INFO(("User event: start scanning"));
+      ESP_ERROR_CHECK(esp_wifi_scan_start(NULL, false));
+    } else {
+      MG_INFO(("WiFi is busy, cannot start scanning"));
+    }
+  } else if (event_id == WIFI_USER_EVENT_PROVISION) {
+    MG_INFO(("User event: provisioning"));
+    s_wifi_ctx.retry_count = 0;
+    if (s_wifi_ctx.state == WIFI_STATE_SCANNING) {
+      MG_INFO(("Stopping ongoing scan before provisioning"));
+      esp_wifi_scan_stop();
+    }
+    if (wifi_get_provisioned()) {
+      MG_INFO(("WiFi is already provisioned, disconnecting first"));
+      wifi_set_provisioned(false);
+      s_wifi_ctx.state = WIFI_STATE_REPROVISIONING;
+      ESP_ERROR_CHECK(esp_wifi_disconnect());
+    } else {
+      wifi_commit_config();
+      s_wifi_ctx.state = WIFI_STATE_CONNECTING;
+      ESP_ERROR_CHECK(esp_wifi_connect());
+    }
+    free(event_data);
+  }
+}
+
+static void event_wifi_handler(void *arg, int32_t event_id, void *event_data)
+{
+  if (event_id == WIFI_EVENT_STA_START) {
+    if (wifi_get_provisioned()) {
+      s_wifi_ctx.state = WIFI_STATE_CONNECTING;
+      ESP_ERROR_CHECK(esp_wifi_connect());
+    }
+  } else if (event_id == WIFI_EVENT_STA_CONNECTED) {
+    s_wifi_ctx.retry_count = 0;
+    s_wifi_ctx.state = WIFI_STATE_IDLE;
+  } else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
+    if (s_wifi_ctx.state == WIFI_STATE_REPROVISIONING) {
+      wifi_commit_config();
+    }
+    if (s_wifi_ctx.retry_count < WIFI_MAX_RETRY) {
+      s_wifi_ctx.retry_count++;
+      s_wifi_ctx.state = WIFI_STATE_CONNECTING;
+      MG_INFO(("Retrying to connect to the AP (%d/%d)",
+               s_wifi_ctx.retry_count, WIFI_MAX_RETRY));
+      ESP_ERROR_CHECK(esp_wifi_connect());
+    } else {
+      MG_INFO(("Failed to connect ap"));
+      s_wifi_ctx.state = WIFI_STATE_IDLE;
+    }
+  } else if (event_id == WIFI_EVENT_SCAN_DONE) {
+    MG_INFO(("WiFi scan done"));
+    wifi_save_scan_results();
+    if (s_wifi_ctx.state == WIFI_STATE_SCANNING) {
+      s_wifi_ctx.state = WIFI_STATE_IDLE;
+    }
+  }
+}
+
+static void ip_event_handler(void *arg, int32_t event_id, void *event_data)
+{
+  if (event_id == IP_EVENT_STA_GOT_IP) {
+    ip_event_got_ip_t *event = (ip_event_got_ip_t *) event_data;
+    MG_INFO(("Got IP ADDRESS: " IPSTR, IP2STR(&event->ip_info.ip)));
+    if (!wifi_get_provisioned()) {
+      wifi_set_provisioned(true);
+      MG_INFO(("wifi provisioned successfully!!! need rebooting..."));
+      //esp_restart();
+    }
+  }
 }
 
 static void event_handler(void *arg, esp_event_base_t event_base,
                           int32_t event_id, void *event_data) {
-  static int retry_count = 0;
-  if (event_id == WIFI_EVENT_STA_START) {
-    if (wifi_get_provisioned()) {
-      esp_wifi_connect();
-    }
-  } else if (event_id == WIFI_EVENT_STA_CONNECTED) {
-    wifi_set_busy(false);
-    retry_count = 0;
-    if (wifi_get_provisioned()) {
-      MG_INFO(("wifi provisioned successfully!!! rebooting..."));
-      wifi_set_provisioned(true);
-      esp_restart();
-    }
-  } else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
-    if (retry_count < WIFI_MAX_RETRY) {
-      wifi_set_busy(true);
-      esp_wifi_connect();
-      retry_count++;
-    } else {
-      MG_INFO(("Failed to connect to SSID, transfer to NOT_PROVISIONED"));
-      wifi_set_busy(false);
-      wifi_set_provisioned(false);
-      wifi_start_provisioning();
-    }
-    MG_INFO(("Connecting to the AP fail, attempt #%d", retry_count));
-  } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-    ip_event_got_ip_t *event = (ip_event_got_ip_t *) event_data;
-    MG_INFO(("Got IP ADDRESS: " IPSTR, IP2STR(&event->ip_info.ip)));
-    wifi_set_busy(false);
-    retry_count = 0;
-  } else if (event_id == WIFI_EVENT_SCAN_DONE) {
-    MG_INFO(("WiFi scan done"));
-    xSemaphoreTake(s_wifi_ctx.mutex, portMAX_DELAY);
-    s_wifi_ctx.ap_count = WIFI_SCAN_LIST_SIZE;
-    memset(s_wifi_ctx.aps, 0, sizeof(s_wifi_ctx.aps));
-    ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&s_wifi_ctx.ap_count, s_wifi_ctx.aps));
-    s_wifi_ctx.busy = false;
-    xSemaphoreGive(s_wifi_ctx.mutex);
+  if(event_base == WIFI_USER_EVENT) {
+    event_user_handler(arg, event_id, event_data);
+  } else if (event_base == WIFI_EVENT) {
+    event_wifi_handler(arg, event_id, event_data);
+  } else if (event_base == IP_EVENT) {
+    ip_event_handler(arg, event_id, event_data);
   }
 }
 
@@ -156,12 +231,15 @@ void wifi_init() {
   ESP_ERROR_CHECK(esp_netif_init());
   ESP_ERROR_CHECK(esp_event_loop_create_default());
   ESP_ERROR_CHECK(esp_event_handler_instance_register(
+      WIFI_USER_EVENT, ESP_EVENT_ANY_ID, &event_handler, NULL, NULL));
+  ESP_ERROR_CHECK(esp_event_handler_instance_register(
       IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, NULL, NULL));
   ESP_ERROR_CHECK(esp_event_handler_instance_register(
       WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler, NULL, NULL));
   /*Initialize WiFi */
   wifi_init_config_t initcfg = WIFI_INIT_CONFIG_DEFAULT();
   ESP_ERROR_CHECK(esp_wifi_init(&initcfg));
+  s_wifi_ctx.state = WIFI_STATE_IDLE;
   if (wifi_get_provisioned()) {
     MG_INFO(("WiFi is provisioned, starting STA mode"));
     wifi_config_t cfg = {};
@@ -195,12 +273,7 @@ void wifi_uninit() {
 }
 
 void wifi_scan_start() {
-  if (!wifi_get_busy()) {
-    wifi_set_busy(true);
-    ESP_ERROR_CHECK(esp_wifi_scan_start(NULL, false));
-  } else {
-    MG_ERROR(("WiFi is busy, cannot start scan"));
-  }
+  esp_event_post(WIFI_USER_EVENT, WIFI_USER_EVENT_SCAN, NULL, 0, portMAX_DELAY);
 }
 
 void wifi_scan_result(struct mg_str *out) {
@@ -225,10 +298,8 @@ void wifi_connect(const char* ssid, const char* pass) {
   wifi_config_t cfg = {};
   strncpy((char*)cfg.sta.ssid, ssid, sizeof(cfg.sta.ssid) - 1);
   strncpy((char*)cfg.sta.password, pass, sizeof(cfg.sta.password) - 1);
-  ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-  ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &cfg));
-  ESP_ERROR_CHECK(esp_wifi_connect());
-  wifi_set_busy(true);
+  wifi_save_config(&cfg);
+  esp_event_post(WIFI_USER_EVENT, WIFI_USER_EVENT_PROVISION, NULL, 0, portMAX_DELAY);
 }
 
 bool wifi_is_provisioned(char* ssid)

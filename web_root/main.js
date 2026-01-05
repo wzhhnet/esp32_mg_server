@@ -393,12 +393,25 @@ function WiFiConfig({}) {
       method: 'POST',
       body: JSON.stringify({ ssid: selectedSsid.ssid, password })
     })
-      .then(r => r.json())
       .then(() => {
         setConnecting(false);
-        // maybe show success
+        setSelectedSsid(null);
+        setPassword('');
+      })
+      .catch(error => {
+        console.error('Connect error:', error);
+        setConnecting(false);
+        setSelectedSsid(null);
+        setPassword('');
       });
   };
+
+  const cancel = () => {
+    setConnecting(false);
+    setSelectedSsid(null);
+    setPassword('');
+  };
+
   useEffect(() => {
     fetchProvisioned();
   }, []);
@@ -424,11 +437,6 @@ function WiFiConfig({}) {
     };
   }, [scanEnabled]);
 
-  const cancel = () => {
-    setConnecting(false);
-    setSelectedSsid(null);
-    setPassword('');
-  }
   return html`
 <div class="m-4 divide-y divide-gray-200 overflow-auto rounded bg-white">
   ${provisioned.state && html`
@@ -442,14 +450,14 @@ function WiFiConfig({}) {
     </div>
   `}
   <div class="font-semibold flex items-center text-gray-600 px-3 justify-between">
-    <div>WiFi Configuration</div>
+    <div>WiFi configuration</div>
     <${Setting} title="Scan" value=${scanEnabled} setfn=${setScanEnabled} type="switch" />
   </div>
   ${scanEnabled && html`
   <div class="p-4">
     <ul class="space-y-2">
       ${ssids.map(ssid => html`
-        <li class="flex justify-between items-center p-2 border rounded">
+        <li class="flex justify-between items-center py-0.5 px-2 border rounded">
           <div class="flex items-center">
             <div class="relative">
               <${Icons.wifi} class="w-4 h-4 ${getSignalIcon(ssid.rssi)}" />
@@ -459,7 +467,7 @@ function WiFiConfig({}) {
               <div class="font-medium">${ssid.ssid}</div>
             </div>
           </div>
-          <button onclick=${() => selectSsid(ssid)} class="px-4 py-2 bg-blue-500 text-white rounded">Select</button>
+          <button onclick=${() => selectSsid(ssid)} class="px-2.5 py-1 bg-blue-500 text-white rounded">Select</button>
         </li>
       `)}
     </ul>
@@ -471,8 +479,10 @@ function WiFiConfig({}) {
     ${!selectedSsid.isopened && html`
       <input type="password" value=${password} oninput=${e => setPassword(e.target.value)} placeholder="Password" class="border p-2 w-full mt-2" />
     `}
-    <button onclick=${connect} disabled=${connecting} class="mt-2 px-4 py-2 bg-green-500 text-white rounded w-full">${connecting ? 'Connecting...' : 'Connect'}</button>
-    <button onclick=${cancel} class="mt-2 px-4 py-2 bg-green-500 text-white rounded w-full">cancel</button>
+    <div class="flex gap-2 mt-2">
+      <button onclick=${connect} disabled=${connecting} class="px-2.5 py-1.5 bg-green-500 text-white rounded flex-1">${connecting ? 'Connecting...' : 'Connect'}</button>
+      <button onclick=${cancel} class="px-2.5 py-1.5 bg-red-500 text-white rounded">Cancel</button>
+    </div>
   </div>
   `}
 </div>
