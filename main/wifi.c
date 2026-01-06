@@ -207,10 +207,10 @@ static void ip_event_handler(void *arg, int32_t event_id, void *event_data)
     MG_INFO(("Got IP ADDRESS: " IPSTR, IP2STR(&event->ip_info.ip)));
     if (!wifi_is_provisioned()) {
       struct wifi_prov_info prov = {};
-      strncpy(prov.ssid, (char*)s_wifi_ctx.cfg.ssid, sizeof(prov.ssid) - 1);
+      strncpy(prov.ssid, (char*)s_wifi_ctx.cfg.ssid, sizeof(prov.ssid));
       esp_ip4addr_ntoa(&event->ip_info.ip, prov.ipv4, sizeof(prov.ipv4));
       wifi_set_provisioned(&prov);
-      MG_INFO(("wifi provisioned successfully!!!"));
+      MG_INFO(("wifi provisioned successfully!!! ssid:%s ipv4:%s", prov.ssid, prov.ipv4));
       //esp_restart();
     }
   }

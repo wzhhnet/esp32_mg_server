@@ -342,8 +342,9 @@ bool wrap_wifi_provisioned(struct mg_str in, struct mg_str* out) {
   struct wifi_prov_info info = {};
   bool provisioned = wifi_provisioned(&info);
   out->len = mg_snprintf(out->buf, out->len,
-                         "{\"cause\":\"success\", \"provisioned\": %s, \"ssid\": \"%s\"}",
-                         provisioned ? "true" : "false", provisioned ? info.ssid : "");
+                         "{\"cause\":\"success\", \"provisioned\": %s, \"ssid\": \"%s\", \"ipv4\": \"%s\"}",
+                         provisioned ? "true" : "false", provisioned ? info.ssid : "", provisioned ? info.ipv4 : "");
+  MG_INFO(("%s info: %s", __func__, out->buf));
   return true;
 }
 

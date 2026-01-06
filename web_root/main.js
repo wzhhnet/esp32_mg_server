@@ -342,7 +342,7 @@ function Settings({}) {
 };
 
 function WiFiConfig({}) {
-  const [provisioned, setProvisioned] = useState({state: false, ssid: ''});
+  const [provisioned, setProvisioned] = useState({state: false, ssid: '', ipv4: ''});
   const [scanEnabled, setScanEnabled] = useState(false);
   const [ssids, setSsids] = useState([]);
   const [selectedSsid, setSelectedSsid] = useState(null);
@@ -365,7 +365,7 @@ function WiFiConfig({}) {
       .then(r => r.json())
       .then(data => {
         // console.log('Provisioned data:', data);
-        setProvisioned({state: data.provisioned, ssid: data.ssid});
+        setProvisioned({state: data.provisioned, ssid: data.ssid, ipv4: data.ipv4});
       });
   }
 
@@ -441,7 +441,9 @@ function WiFiConfig({}) {
 <div class="m-4 divide-y divide-gray-200 overflow-auto rounded bg-white">
   ${provisioned.state && html`
     <div class="font-semibold flex items-center text-green-600 px-3 justify-between">
-      <div>WiFi is connected to ${provisioned.ssid}</div>
+      <div>WiFi provisioned</div>
+      <div>SSID: ${provisioned.ssid}</div>
+      <div>IPV4: ${provisioned.ipv4}</div>
     </div>
   `}
   ${!provisioned.state && html`
