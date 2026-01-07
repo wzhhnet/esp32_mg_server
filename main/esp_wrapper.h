@@ -3,6 +3,7 @@
 
 #include "driver/gpio.h"
 #include "driver/ledc.h"
+#include "driver/temperature_sensor.h"
 #include "esp_chip_info.h"
 #include "esp_log.h"
 #include "mongoose.h"
@@ -26,5 +27,6 @@ bool wrap_sys_info(struct mg_str in, struct mg_str* out);
 bool wrap_wifi_scan(struct mg_str in, struct mg_str* out);
 bool wrap_wifi_connect(struct mg_str in, struct mg_str* out);
 bool wrap_wifi_provisioned(struct mg_str in, struct mg_str* out);
+bool wrap_sys_stats(struct mg_str in, struct mg_str* out);
 
 #endif

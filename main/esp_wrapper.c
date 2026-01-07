@@ -370,3 +370,26 @@ bool wrap_wifi_connect(struct mg_str in, struct mg_str* out) {
   return true;
 }
 
+bool wrap_sys_stats(struct mg_str in, struct mg_str* out)
+{
+  temperature_sensor_handle_t temp_sensor = NULL;
+  temperature_sensor_config_t temp_sensor_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(10, 50);
+  esp_err_t err = temperature_sensor_install(&temp_sensor_config, &temp_sensor);
+  if (ESP_OK != err) goto ERR;
+  err = temperature_sensor_enable(temp_sensor);
+  if (ESP_OK != err) goto ERR;
+  float tsens_out;
+  err = temperature_sensor_get_celsius(temp_sensor, &tsens_out);
+  if (ESP_OK != err) goto ERR;
+  MG_INFO(("%s temperature in %f °C", __func__, tsens_out));
+  out->len = mg_snprintf(out->buf, out->len,
+                  "{\"cause\":\"success\", \
+                    \"temperature\":%f,    \
+                    \"humidity\": 0}", tsens_out);
+  temperature_sensor_disable(temp_sensor);
+  temperature_sensor_uninstall(temp_sensor);
+  return true;
+ERR:
+  out->len = mg_snprintf(out->buf, out->len, JSON_ESP32_ERROR);
+  return false;
+}

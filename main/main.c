@@ -84,7 +84,7 @@ static void rest_call(struct mg_connection* c, struct mg_http_message* hm,
   struct mg_str out = {.buf = buf, .len = sizeof(buf)};
   if (func(hm->body, &out)) {
     MG_INFO(("%s http reply success", __func__));
-    mg_http_reply(c, 200, "", "%.*s", out.len, out.buf);
+    mg_http_reply(c, 200, JSON_HEADERS, "%.*s", out.len, out.buf);
   } else {
     MG_ERROR(("%s http reply error", __func__));
     mg_http_reply(c, 400, "", "%.*s", out.len, out.buf);
@@ -123,6 +123,8 @@ static void rest_system_handler(struct mg_connection* c, struct mg_http_message*
                          struct mg_str func) {
   if (mg_match(func, mg_str("info"), NULL)) {
     rest_call(c, hm, wrap_sys_info);
+  } else if (mg_match(func, mg_str("stats"), NULL)) {
+    rest_call(c, hm, wrap_sys_stats);
   } else {
     mg_http_reply(c, 400, "", "{\"cause\": \"the rest api is not exist\"}\n");
   }

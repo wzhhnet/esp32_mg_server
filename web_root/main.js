@@ -161,7 +161,7 @@ function DeveloperNote({text, children}) {
 
 function Main({}) {
   const [stats, setStats] = useState(null);
-  const refresh = () => fetch('api/stats/get').then(r => r.json()).then(r => setStats(r));
+  const refresh = () => fetch('rest/sys/stats').then(r => r.json()).then(r => setStats(r));
   useEffect(refresh, []);
   if (!stats) return '';
   return html`
@@ -175,7 +175,7 @@ function Main({}) {
   <//>
   <div class="p-4 sm:p-2 mx-auto grid grid-cols-1 lg:grid-cols-2 gap-4">
 
-    <${Chart} data=${stats.points} />
+    <!--${Chart} data=${stats.points} /-->
 
     <div class="my-4 hx-24 bg-white border rounded-md shadow-lg" role="alert">
       <${DeveloperNote}
