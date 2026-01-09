@@ -191,9 +191,7 @@ function Main({}) {
     <//>
   <//>
   <div class="p-4 sm:p-2 mx-auto grid grid-cols-1 lg:grid-cols-2 gap-4">
-
     <!--${Chart} data=${stats.points} /-->
-
     <div class="my-4 hx-24 bg-white border rounded-md shadow-lg" role="alert">
       <${DeveloperNote}
         text="This chart is an SVG image, generated on the fly from the
@@ -469,7 +467,7 @@ function WiFiConfig({}) {
     </div>
   `}
   <div class="font-semibold flex items-center text-gray-600 px-3 justify-between">
-    <div>WiFi configuration</div>
+    <!--div>WiFi configuration</div-->
     <${Setting} title="Scan" value=${scanEnabled} setfn=${setScanEnabled} type="switch" />
   </div>
   ${scanEnabled && html`
