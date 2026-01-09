@@ -11,7 +11,8 @@
     return RC;                                                     \
   }
 #endif
-
+static long s_led_state = 0;
+static led_strip_handle_t s_led_handle = NULL;
 static char g_sysinfo[64];
 const char* chip_info();
 const struct chip_info_t {
@@ -32,6 +33,30 @@ const struct chip_info_t {
     {CHIP_ESP32H4, " ESP32-H4"},
     {CHIP_POSIX_LINUX, "POSIX_LINUX"},
 };
+
+static void configure_led(void)
+{
+  led_strip_config_t strip_config = {
+    .strip_gpio_num = 38,  // The GPIO that connected to the LED strip's data line
+    .max_leds = 1,                 // The number of LEDs in the strip,
+    .led_model = LED_MODEL_WS2812, // LED strip model, it determines the bit timing
+    .color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_GRB, // The color component format is G-R-B
+    .flags = {
+      .invert_out = false, // don't invert the output signal
+    }
+  };
+  led_strip_rmt_config_t rmt_config = {
+    .clk_src = RMT_CLK_SRC_DEFAULT,    // different clock source can lead to different power consumption
+    .resolution_hz = 10 * 1000 * 1000, // RMT counter clock frequency: 10MHz
+    .mem_block_symbols = 64,           // the memory size of each RMT channel, in words (4 bytes)
+    .flags = {
+      .with_dma = false, // DMA feature is available on chips like ESP32-S3/P4
+    }
+  };
+  /// Create the LED strip object
+  ESP_ERROR_CHECK(led_strip_new_rmt_device(&strip_config, &rmt_config, &s_led_handle));
+  led_strip_clear(s_led_handle);
+}
 
 bool wrap_gpio_config(struct mg_str in, struct mg_str* out) {
   gpio_config_t cfg = {};
@@ -392,4 +417,25 @@ bool wrap_sys_stats(struct mg_str in, struct mg_str* out)
 ERR:
   out->len = mg_snprintf(out->buf, out->len, JSON_ESP32_ERROR);
   return false;
+}
+
+bool wrap_sys_led(struct mg_str in, struct mg_str* out)
+{
+  if (!s_led_handle) {
+    configure_led();
+  }
+  s_led_state = mg_json_get_long(in, "$.state", 0);
+  long red = mg_json_get_long(in, "$.red", 0);
+  long green = mg_json_get_long(in, "$.green", 0);
+  long blue = mg_json_get_long(in, "$.blue", 0);
+  MG_INFO(("%s json=%.*s state = %d", __func__, in.len, in.buf, s_led_state));
+  if (s_led_state) {
+    led_strip_set_pixel(s_led_handle, 0, red, green, blue);
+    /* Refresh the strip to send data */
+    led_strip_refresh(s_led_handle);
+  } else {
+    led_strip_clear(s_led_handle);
+  }
+  out->len = mg_snprintf(out->buf, out->len, JSON_SUCCESS);
+  return true;
 }

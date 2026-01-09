@@ -2,7 +2,7 @@
 
 'use strict';
 import { h, render, useState, useEffect, useRef, html, Router } from  './bundle.js';
-import { Icons, Login, Setting, Button, Stat, tipColors, Colored, Notification, Pagination, UploadFileButton } from './components.js';
+import { Icons, Login, Setting, Button, Stat, tipColors, Colored, Notification, Pagination, UploadFileButton, TextValue } from './components.js';
 
 const Logo = props => html`<svg class=${props.class} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12.87 12.85"><defs><style>.ll-cls-1{fill:none;stroke:#000;stroke-miterlimit:10;stroke-width:0.5px;}</style></defs><g id="Layer_2" data-name="Layer 2"><g id="Layer_1-2" data-name="Layer 1"><path class="ll-cls-1" d="M12.62,1.82V8.91A1.58,1.58,0,0,1,11,10.48H4a1.44,1.44,0,0,1-1-.37A.69.69,0,0,1,2.84,10l-.1-.12a.81.81,0,0,1-.15-.48V5.57a.87.87,0,0,1,.86-.86H4.73V7.28a.86.86,0,0,0,.86.85H9.42a.85.85,0,0,0,.85-.85V3.45A.86.86,0,0,0,10.13,3,.76.76,0,0,0,10,2.84a.29.29,0,0,0-.12-.1,1.49,1.49,0,0,0-1-.37H2.39V1.82A1.57,1.57,0,0,1,4,.25H11A1.57,1.57,0,0,1,12.62,1.82Z"/><path class="ll-cls-1" d="M10.48,10.48V11A1.58,1.58,0,0,1,8.9,12.6H1.82A1.57,1.57,0,0,1,.25,11V3.94A1.57,1.57,0,0,1,1.82,2.37H8.9a1.49,1.49,0,0,1,1,.37l.12.1a.76.76,0,0,1,.11.14.86.86,0,0,1,.14.47V7.28a.85.85,0,0,1-.85.85H8.13V5.57a.86.86,0,0,0-.85-.86H3.45a.87.87,0,0,0-.86.86V9.4a.81.81,0,0,0,.15.48l.1.12a.69.69,0,0,0,.13.11,1.44,1.44,0,0,0,1,.37Z"/></g></g></svg>`;
 
@@ -161,14 +161,31 @@ function DeveloperNote({text, children}) {
 
 function Main({}) {
   const [stats, setStats] = useState(null);
+  const [rgb, setRgb] = useState({red: 0, green: 0, blue: 0});
+  const [led, setLed] = useState(false);
   const refresh = () => fetch('rest/sys/stats').then(r => r.json()).then(r => setStats(r));
+  const ledfetch = () => fetch('rest/sys/led', {
+    method: 'post', body: JSON.stringify({ state: led ? 1 : 0, red: rgb.red, green: rgb.green, blue: rgb.blue }) 
+  });
+
+  useEffect(() => {
+    ledfetch();
+  }, [led, rgb.red, rgb.green, rgb.blue]);
+
   useEffect(refresh, []);
   if (!stats) return '';
   return html`
 <div class="p-2">
   <div class="p-4 sm:p-2 mx-auto grid grid-cols-2 lg:grid-cols-4 gap-4">
     <${Stat} title="Temperature" text="${stats.temperature} °C" tipText="good" tipIcon=${Icons.ok} tipColors=${tipColors.green} />
-    <${Stat} title="Humidity" text="${stats.humidity} %" tipText="warn" tipIcon=${Icons.warn} tipColors=${tipColors.yellow} />
+    <div class="bg-white border rounded-md shadow-lg p-4">
+      <${Setting} title="RGB LED" value=${led} setfn=${setLed} type="switch" />
+      <div class="mt-4 space-y-2">
+        <${TextValue} value=${rgb.red} setfn=${v => setRgb(prev => ({...prev, red: parseInt(v) || 0}))} type="number" min="0" max="255" placeholder="Red (0-255)" />
+        <${TextValue} value=${rgb.green} setfn=${v => setRgb(prev => ({...prev, green: parseInt(v) || 0}))} type="number" min="0" max="255" placeholder="Green (0-255)" />
+        <${TextValue} value=${rgb.blue} setfn=${v => setRgb(prev => ({...prev, blue: parseInt(v) || 0}))} type="number" min="0" max="255" placeholder="Blue (0-255)" />
+      </div>
+    <//>
     <div class="bg-white col-span-2 border rounded-md shadow-lg" role="alert">
       <${DeveloperNote} text="Stats data is received from the Mongoose backend" />
     <//>
