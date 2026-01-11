@@ -2,6 +2,7 @@
 #define MODULE_TAG "wrapper_sdk"
 #endif
 
+#include "3461as.h"
 #include "esp_wrapper.h"
 
 #ifndef RETURN_IF_FAIL
@@ -12,6 +13,7 @@
   }
 #endif
 static long s_led_state = 0;
+static long s_dig_state = 0;
 static led_strip_handle_t s_led_handle = NULL;
 static char g_sysinfo[64];
 const char* chip_info();
@@ -435,6 +437,27 @@ bool wrap_sys_led(struct mg_str in, struct mg_str* out)
     led_strip_refresh(s_led_handle);
   } else {
     led_strip_clear(s_led_handle);
+  }
+  out->len = mg_snprintf(out->buf, out->len, JSON_SUCCESS);
+  return true;
+}
+
+bool wrap_sys_digits(struct mg_str in, struct mg_str* out) {
+  s_dig_state = mg_json_get_long(in, "$.state", 0);
+  MG_INFO(("%s json=%.*s state = %d", __func__, in.len, in.buf, s_dig_state));
+  if (s_dig_state) {
+    _3461_as_start();
+    four_digit digs = {
+      .leds = {
+        {LED_DISPLAY_1, true},
+        {LED_DISPLAY_2, true},
+        {LED_DISPLAY_3, true},
+        {LED_DISPLAY_4, true}
+      }
+    };
+    _3461_as_update(&digs);
+  } else {
+    _3461_as_stop();
   }
   out->len = mg_snprintf(out->buf, out->len, JSON_SUCCESS);
   return true;

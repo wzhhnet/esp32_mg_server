@@ -30,5 +30,6 @@ bool wrap_wifi_connect(struct mg_str in, struct mg_str* out);
 bool wrap_wifi_provisioned(struct mg_str in, struct mg_str* out);
 bool wrap_sys_stats(struct mg_str in, struct mg_str* out);
 bool wrap_sys_led(struct mg_str in, struct mg_str* out);
+bool wrap_sys_digits(struct mg_str in, struct mg_str* out);
 
 #endif

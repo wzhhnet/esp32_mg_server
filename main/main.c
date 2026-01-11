@@ -127,6 +127,8 @@ static void rest_system_handler(struct mg_connection* c, struct mg_http_message*
     rest_call(c, hm, wrap_sys_stats);
   } else if (mg_match(func, mg_str("led"), NULL)) {
     rest_call(c, hm, wrap_sys_led);
+  } else if (mg_match(func, mg_str("digs"), NULL)) {
+    rest_call(c, hm, wrap_sys_digits);
   } else {
     mg_http_reply(c, 400, "", "{\"cause\": \"the rest api is not exist\"}\n");
   }

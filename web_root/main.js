@@ -160,6 +160,7 @@ function DeveloperNote({text, children}) {
 };
 
 function Main({}) {
+  const [digs, setDigs] = useState(false);
   const [stats, setStats] = useState(null);
   const [rgb, setRgb] = useState({red: 0, green: 0, blue: 0});
   const [led, setLed] = useState(false);
@@ -167,11 +168,13 @@ function Main({}) {
   const ledfetch = () => fetch('rest/sys/led', {
     method: 'post', body: JSON.stringify({ state: led ? 1 : 0, red: rgb.red, green: rgb.green, blue: rgb.blue }) 
   });
+  const digfetch = () => fetch('rest/sys/digs', {method: 'post', body: JSON.stringify({ state: digs ? 1 : 0})});
 
   useEffect(() => {
     ledfetch();
   }, [led, rgb.red, rgb.green, rgb.blue]);
 
+  useEffect(digfetch, [digs]);
   useEffect(refresh, []);
   if (!stats) return '';
   return html`
@@ -185,6 +188,9 @@ function Main({}) {
         <${TextValue} value=${rgb.green} setfn=${v => setRgb(prev => ({...prev, green: parseInt(v) || 0}))} type="number" min="0" max="255" placeholder="Green (0-255)" />
         <${TextValue} value=${rgb.blue} setfn=${v => setRgb(prev => ({...prev, blue: parseInt(v) || 0}))} type="number" min="0" max="255" placeholder="Blue (0-255)" />
       </div>
+    <//>
+    <div class="bg-white border rounded-md shadow-lg p-4">
+      <${Setting} title="Digit time" value=${digs} setfn=${setDigs} type="switch" />
     <//>
     <div class="bg-white col-span-2 border rounded-md shadow-lg" role="alert">
       <${DeveloperNote} text="Stats data is received from the Mongoose backend" />
