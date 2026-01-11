@@ -1,19 +1,23 @@
 #include <string.h>
 #include "esp_timer.h"
 #include "esp_log.h"
+#include "esp_sntp.h"
 #include "driver/gpio.h"
 #include "3461as.h"
 
+#define LOG_TAG "3461as"
 #define _PIN_MASK(_PIN, _DISP)  (( 1U << (_PIN) ) & (_DISP))
 #define _PIN_LEVEL(_PIN, _DISP) (_PIN_MASK(_PIN, _DISP) > 0 ? 1 : 0)
 
 static struct leds_ctx_t {
+  bool clock_mode;
   uint8_t index; // digit index
   four_digit r_ctx;
   four_digit w_ctx;
   volatile bool w_flag;
   esp_timer_handle_t timer;
 } s_leds_ctx = {
+  .clock_mode = true,
   .index = LED_INDIX_1,
   .r_ctx = {
     .leds = {
@@ -34,6 +38,18 @@ static struct leds_ctx_t {
   .w_flag = false,
   .timer = NULL
 };
+static led_segments s_dig_map[10] = {
+  LED_DISPLAY_0,
+  LED_DISPLAY_1,
+  LED_DISPLAY_2,
+  LED_DISPLAY_3,
+  LED_DISPLAY_4,
+  LED_DISPLAY_5,
+  LED_DISPLAY_6,
+  LED_DISPLAY_7,
+  LED_DISPLAY_8,
+  LED_DISPLAY_9
+};
 
 static uint8_t s_gpio[_3461_AS_PIN_NUM] = {
   8,    // PIN_A
@@ -49,6 +65,21 @@ static uint8_t s_gpio[_3461_AS_PIN_NUM] = {
   13,   // PIN_DIG3
   14,   // PIN_DIG4
 };
+
+static void time_sync_cb(struct timeval *tv)
+{
+    setenv("TZ", "CST-8", 1);
+    tzset();
+    ESP_LOGI(LOG_TAG, "Time synchronized");
+}
+
+static void init_sntp_async(void)
+{
+  esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+  esp_sntp_setservername(0, "pool.ntp.org");
+  esp_sntp_set_time_sync_notification_cb(time_sync_cb);
+  esp_sntp_init();
+}
 
 static void _3461_as_clear() {
   gpio_set_level(s_gpio[LED_INDIX_1], 1);
@@ -93,7 +124,30 @@ static void _3461_as_display(uint8_t dig_index, one_digit* led) {
   gpio_set_level(s_gpio[_3461_AS_PIN_DP], led->dp ? 1 : 0);
 }
 
+static void write_current_time() {
+  time_t now;
+  struct tm info;
+  time(&now);
+  localtime_r(&now, &info);
+  four_digit digs = {};
+  digs.leds[LED_INDIX_1].segs = s_dig_map[info.tm_hour / 10];
+  digs.leds[LED_INDIX_2].segs = s_dig_map[info.tm_hour % 10];
+  digs.leds[LED_INDIX_3].segs = s_dig_map[info.tm_min / 10];
+  digs.leds[LED_INDIX_4].segs = s_dig_map[info.tm_min % 10];
+  digs.leds[LED_INDIX_2].dp = true;
+  if (memcmp(&digs, &s_leds_ctx.w_ctx, sizeof(four_digit))) {
+    char buf[64];
+    strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S %Z", &info);
+    ESP_LOGI(LOG_TAG, "Local time: %s", buf);
+    memcpy(&s_leds_ctx.w_ctx, &digs, sizeof(four_digit));
+    s_leds_ctx.w_flag = true;
+  }
+}
+
 static void _3461_as_flash(void *arg) {
+  if (s_leds_ctx.clock_mode) {
+    write_current_time();
+  }
   if (s_leds_ctx.index == LED_INDIX_1) {
     _3461_as_display(LED_INDIX_1, &s_leds_ctx.r_ctx.leds[LED_INDIX_1]);
     s_leds_ctx.index = LED_INDIX_2;
@@ -121,6 +175,7 @@ void _3461_as_start() {
   };
 
   if (s_leds_ctx.timer == NULL) {
+    init_sntp_async();
     esp_timer_create(&args, &s_leds_ctx.timer);
   }
   esp_timer_start_periodic(s_leds_ctx.timer, 1500); // 1.5 ms
